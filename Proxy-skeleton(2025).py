@@ -4,6 +4,8 @@ import sys
 import os
 import argparse
 import re
+import datetime
+import time
 
 # 1MB buffer size
 BUFFER_SIZE = 1000000
@@ -197,28 +199,30 @@ while True:
           else:
               break
       # ~~~~ END CODE INSERT ~~~~
-      response_str = response_bytes.decode('utf-8')
-      response_lines = response_str.split('\n')
+      response_str = response_bytes.decode('utf-8', errors='ignore')
+      response_lines = response_str.split('\r\n')
       status_line = response_lines[0]
       try:
-          status_code = int(status_line.split(' ')[2])
-          
+          status_code = int(status_line.split(' ')[1])
+          # Check for redirection status codes and cache control
           is_redirect = status_code in [301, 302]
           max_age = None
           for line in response_lines[1:]:
-              if line == '':
+              if line == '':  # End of headers
                   break
               if line.lower().startswith('cache-control:'):
-                  max_age_match = re.search(r'max_age=(\d+)', line, re.IGNORECASE)
+                  max_age_match = re.search(r'max-age=(\d+)', line, re.IGNORECASE)
                   if max_age_match:
                       max_age = int(max_age_match.group(1))
                       print(f"Found max-age directive: {max_age} seconds")
 
-          should_cache = False
-          if max_age and max_age > 0:
-              should_cache = True
-              print("Caching enabled for response")
-                
+          # Caching decision
+          should_cache = True
+          if max_age == 0:
+              should_cache = False
+              print("Not caching due to max-age=0")
+              
+          #  After writing to the cache, add metadata
           if should_cache:
               metadataLocation = cacheLocation + '.meta'
               with open(metadataLocation, 'w') as metaFile:
