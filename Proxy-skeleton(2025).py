@@ -109,7 +109,24 @@ while True:
     print ('Cache location:\t\t' + cacheLocation)
 
     fileExists = os.path.isfile(cacheLocation)
-    
+    metadataLocation = cacheLocation + '.meta'
+    if os.path.isfile(metadataLocation):
+        try:
+            with open(metadataLocation, 'r') as metaFile:
+                metadata = metaFile.read()
+                cached_time_match = re.search(r'cached_time: (.+)', metadata)
+                max_age_match = re.search(r'max-age: (\d+)', metadata)
+                
+                if cached_time_match and max_age_match:
+                    cached_time = datetime.datetime.fromisoformat(cached_time_match.group(1))
+                    max_age = int(max_age_match.group(1))
+                    age_seconds = (datetime.datetime.now() - cached_time).total_seconds()
+                    
+                    if age_seconds > max_age:
+                        print(f"Cache expired: age={age_seconds}s, max-age={max_age}s")
+                        raise FileNotFoundError("Cache expired")
+        except Exception as e:
+            print(f"Error checking cache validity: {e}")    
     # Check wether the file is currently in the cache
     cacheFile = open(cacheLocation, "r")
     cacheData = cacheFile.readlines()
@@ -172,9 +189,45 @@ while True:
 
       # Get the response from the origin server
       # ~~~~ INSERT CODE ~~~~
-      response_bytes = originServerSocket.recv(BUFFER_SIZE)
+      response_bytes = b""
+      while True:
+          data = originServerSocket.recv(BUFFER_SIZE)
+          if len(data) > 0:
+              response_bytes += data
+          else:
+              break
       # ~~~~ END CODE INSERT ~~~~
+      response_str = response_bytes.decode('utf-8')
+      response_lines = response_str.split('\n')
+      status_line = response_lines[0]
+      try:
+          status_code = int(status_line.split(' ')[2])
+          
+          is_redirect = status_code in [301, 302]
+          max_age = None
+          for line in response_lines[1:]:
+              if line == '':
+                  break
+              if line.lower().startswith('cache-control:'):
+                  max_age_match = re.search(r'max_age=(\d+)', line, re.IGNORECASE)
+                  if max_age_match:
+                      max_age = int(max_age_match.group(1))
+                      print(f"Found max-age directive: {max_age} seconds")
 
+          should_cache = False
+          if max_age and max_age > 0:
+              should_cache = True
+              print("Caching enabled for response")
+                
+          if should_cache:
+              metadataLocation = cacheLocation + '.meta'
+              with open(metadataLocation, 'w') as metaFile:
+                  metaFile.write(f"cached_time: {datetime.datetime.now().isoformat()}\n")
+                  metaFile.write(f"status_code: {status_code}\n")
+                  if max_age is not None:
+                      metaFile.write(f"max-age: {max_age}\n")
+      except:
+          print("Failed to parse response or handle caching")
       # Send the response to the client
       # ~~~~ INSERT CODE ~~~~
       clientSocket.sendall(response_bytes)
